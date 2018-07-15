@@ -299,7 +299,7 @@ function Get-CursorIsOnWormSegment {
     # Check if the player is running into himself
     $X1 = $pos.X
     $X2 = $X1 + 1
-     $Y = $pos.Y
+    $Y = $pos.Y
     if ($worm.Segments."X1$($X1)X2$($X2)Y$($Y)") {
         return $true
     }
