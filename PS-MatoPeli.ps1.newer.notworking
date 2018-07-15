@@ -8,6 +8,13 @@ $Script:Exit = $false
 $Script:Score = 0
 $fenceColor = 'Yellow'
 
+# :TODO: For shits and giggles, I could remove the segment 
+# array list and add a script method to the worm that 
+# constructs a correctly ordered array from the hashmap 
+# and then erases the worm from the tip of the tail to its 
+# head. Maybe keep the head on screen for gore and merriment.
+# This would also have the benefit of not having to add to 
+# the array list while the game is ongoing.
 # :TODO: Remove the fence when game ends
 # :TODO: Diagonal movement! Or not, maybe.
 # :TODO: Clear the first row
@@ -17,16 +24,6 @@ $fenceColor = 'Yellow'
 # ...though I guess when you start generating tasty morsels, 
 # the game could just go on forever.
 # :TODO: Allow play area to be set via parameter(s)
-# :TODO: It does kinda seems like the game gets slower when 
-# the worm gets longer, there shouldn't really be a reason 
-# for that to happen. Well, it might be because there's more 
-# segments to get through to see if the player has hit the 
-# worm... that could probably be improved. Maybe a hashmap 
-# or something could work, such as "does $solid.X12Y21 exist".
-# Right now, in fact it's searching twice if the first one 
-# does not hit. In a manner that might not be the fastest 
-# possible. Could also check if there's anything but the 
-# background in a position before doing other checks. Yeah.
 
 $playArea = @{
     UpperLeft = [PSCustomObject]@{
@@ -54,21 +51,21 @@ if ((($UpperRight.X - $UpperLeft.X + 1) % 2) -ne 0) {
     $playArea.BottomLeft.X += 1
 }
 
-[System.Collections.ArrayList]$segments = @(
-    [PSCustomObject]@{
-        X1 = 0 #    To...
-        X2 = 0 # ...be... # :TODO: Now that I implemented the two X character segments, 
-                          # I realize X2 isn't really required. Get rid of it.
-         Y = 0 # ...determined!
-    }
-)
-
 $worm = [PSCustomObject]@{
-    Char = '+'
-    Color = @('Magenta', 'Green', 'Cyan', 'Red', 'Yellow')[0]
-    Length = 3
-    Direction = 'Right'
-    Segments = $segments
+    Color   = @('Magenta', 'Green', 'Cyan', 'Red', 'Yellow')[0]
+    Length  = 3
+    CurrentLength = 0   # Compared to Length to determine if a tail segment 
+                        # should be removed. A hopeful performance consideration.
+    Direction       = 'Right'
+    Segments        = @{}
+    LastNewSegment  = $null
+    TailTipKey      = $null
+    SegmentKeys     = [System.Collections.ArrayList]$segments = @()
+    # SegmentKeys is required to keep track of the last key in order to 
+    # be able to remove it. Unless I come up with an alternative. Which I hope I do. 
+    # I could add a Direction to each segment and infer from that what the next 
+    # tail segment is. Shit, I'm trying that! :TODO:
+    TailTipIndex    = 0
 }
 
 function Move-CursorPosition {
@@ -120,7 +117,7 @@ function Write-Score {
     Set-CursorPosition -X $pos.X -Y $pos.Y
 }
 
-function Place-Character {
+function Write-Character {
     Param(
         [Parameter(Mandatory=$true)][Char]$Character,
         [Parameter(Mandatory=$false)][String]$ForegroundColor = (Get-Host).ui.rawui.ForegroundColor,
@@ -141,91 +138,143 @@ function Place-Character {
     Set-CursorPosition -X $pos.X -Y $pos.Y
 }
 
-function Add-WormSegment {
-    # Capture the content of the destination cell, 
-    # if it's not a whitespace, eat it and grow!
-    # :TODO: Update for two part segment. It's a bit of work though, when going 
-    # left and right, the X position of the rectangle need to be adjusted 
-    # correctly or the worm will rack up score on itself.
-    $pos = $host.UI.RawUI.CursorPosition
-    $rec = New-Object System.Management.Automation.Host.Rectangle $pos.X, $pos.Y, $pos.X, $pos.Y
-    $destinationCell = $Host.UI.RawUI.GetBufferContents($rec)
-    if ($destinationCell.Character -ne ' ') {
-        $worm.Length += 1
-        $Script:Score = $Script:Score + 1
-    }
+function Convert-ToWorm {
+    # :TODO: Change to Get-WormDestinationPositionBuffer, return $destinationPos.
+    # Perhaps even create Get-PositionBuffer and just feed coordinates from 
+    # this to that.
 
-    # :TODO: Clean up the reoccurring code or whatever
+    # Capture the content of the destination position, 
+    # if it's not just whitespace, eat it and grow!
+
+    $pos = $host.UI.RawUI.CursorPosition
+
+    # :TODO: Shit, the worm now gets a point from the fence
+
+    #New-Object System.Management.Automation.Host.Rectangle LEFT, BOTTOM, RIGHT, TOP
     switch ($worm.Direction) {
         Up      {
-            $wormEyeChar = "'"
-            $wormBodyChar = '-'
-            # Place left half of the segment
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
-
-            # Move cursor one position to the right and place the right half of the segment
-            Move-CursorPosition -X 1
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
+            $left   = $pos.X
+            $bottom = ($pos.Y - 1)
+            $right  = ($pos.X + 1)
+            $top    = ($pos.Y - 1)
         }
         Right   {
-            $wormEyeChar = ':'
-            $wormBodyChar = '|'
-            # Place left half of the segment
-            Place-Character -Character ' ' -ForegroundColor White `
-                -BackgroundColor $worm.Color
-
-            # Move cursor one position to the right and place the right half of the segment
-            Move-CursorPosition -X 1
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
+            $left   = ($pos.X + 2)
+            $bottom = $pos.Y
+            $right  = ($pos.X + 3)
+            $top    = $pos.Y
         }
         Down    {
-            $wormEyeChar = '.'
-            $wormBodyChar = '-'
-            # Place left half of the segment
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
-
-            # Move cursor one position to the right and place the right half of the segment
-            Move-CursorPosition -X 1
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
+            $left   = $pos.X
+            $bottom = ($pos.Y + 1)
+            $right  = ($pos.X + 1)
+            $top    = ($pos.Y + 1)
         }
         Left    {
-            $wormEyeChar = ':'
+            $left   = ($pos.X - 2)
+            $bottom = $pos.Y
+            $right  = ($pos.X - 1)
+            $top    = $pos.Y
+        }
+    }
+    $rec = New-Object System.Management.Automation.Host.Rectangle $left, $bottom, $right, $top
+    
+    $destinationPos = $Host.UI.RawUI.GetBufferContents($rec)
+    if (($destinationPos[0,0].Character -ne ' ') -or ($destinationPos[0,1].Character -ne ' ')) {
+        $worm.Length += 1
+        $Script:Score += 1
+    }
+}
+function Add-WormSegment {
+
+    Convert-ToWorm
+
+    switch ($worm.Direction) {
+        Up      {
+            $wormEyeChar1 = "'"
+            $wormEyeChar2 = "'"
+            $wormBodyChar = '-'
+        }
+        Right   {
+            $wormEyeChar1 = ' '
+            $wormEyeChar2 = ':'
             $wormBodyChar = '|'
-            # Place left half of the segment
-            Place-Character -Character $wormEyeChar -ForegroundColor White `
-                -BackgroundColor $worm.Color
-
-            # Move cursor one position to the right and place the right half of the segment
-            Move-CursorPosition -X 1
-            Place-Character -Character ' ' -ForegroundColor White `
-                -BackgroundColor $worm.Color
+        }
+        Down    {
+            $wormEyeChar1 = '.'
+            $wormEyeChar2 = '.'
+            $wormBodyChar = '-'
+        }
+        Left    {
+            $wormEyeChar1 = ':'
+            $wormEyeChar2 = ' '
+            $wormBodyChar = '|'
         }
     }
 
+    $pos = $host.UI.RawUI.CursorPosition
+
+    # Place left half of the segment
+    Write-Character -Character $wormEyeChar1 -ForegroundColor White -BackgroundColor $worm.Color
+
+    # Move cursor one position to the right and place the right half of the segment
+    Move-CursorPosition -X 1
+    Write-Character -Character $wormEyeChar2 -ForegroundColor White -BackgroundColor $worm.Color
+
+    # Replace the previous head characters with body characters
     if ($worm.Segments.Count -gt 1) {
-        Place-Character -Character $wormBodyChar -X $worm.Segments[-1].X1 -Y $worm.Segments[-1].Y `
+        Write-Character -Character $wormBodyChar -X $worm.LastNewSegment.X -Y $worm.LastNewSegment.Y `
             -BackgroundColor $worm.Color -ForegroundColor Black
-        Place-Character -Character $wormBodyChar -X $worm.Segments[-1].X2 -Y $worm.Segments[-1].Y `
+        Write-Character -Character $wormBodyChar -X ($worm.LastNewSegment.X + 1) -Y $worm.LastNewSegment.Y `
             -BackgroundColor $worm.Color -ForegroundColor Black
     }
-    $worm.Segments.Add(
-        [PSCustomObject]@{
-            X1 = $pos.X
-            X2 = $pos.X + 1
-             Y = $pos.Y
-        }
-    ) | Out-Null
+    
+    # Add segment to the worm object
+    $X1 = $pos.X
+    $X2 = $X1 + 1
+     $Y = $pos.Y
+    $worm.LastNewSegment = @{X = $X1; Y = $Y; Direction = $worm.Direction}
+    $segmentKey = "X1$($X1)X2$($X2)Y$($Y)"
+    $worm.Segments.$segmentKey = $worm.LastNewSegment
+    $worm.SegmentKeys.Add($segmentKey) | Out-Null
+    $worm.CurrentLength += 1
 }
 
 function Remove-WormSegment {
-    Place-Character -Character ' ' -X $worm.Segments[0].X1 -Y $worm.Segments[0].Y
-    Place-Character -Character ' ' -X $worm.Segments[0].X2 -Y $worm.Segments[0].Y    
-    $worm.Segments.RemoveAt(0)
+    #$tailKey = $($worm.SegmentKeys[$worm.TailTipIndex])
+    #$tailSegment = $worm.Segments.$tailKey
+    $tailTipSegment = $worm.Segment.($worm.TailTipKey)
+    Write-Character -Character ' ' -X $tailTipSegment.X -Y $tailTipSegment.Y
+    Write-Character -Character ' ' -X ($tailTipSegment.X + 1) -Y $tailTipSegment.Y
+
+    switch ($tailTipSegment.Direction) {
+        Up      {
+            $X1 = $tailTipSegment.X
+            $X2 = $X1 + 1
+             $Y = $tailTipSegment.Y - 1
+        }
+        Right   {
+            $X1 = $tailTipSegment.X + 1
+            $X2 = $X1 + 1
+             $Y = $tailTipSegment.Y - 1
+        }
+        Down    {
+            $X1 = $tailTipSegment.X
+            $X2 = $X1 + 1
+             $Y = $tailTipSegment.Y + 1
+        }
+        Left    {
+            $X1 = $tailTipSegment.X - 2
+            $X2 = $X1 + 1
+             $Y = $tailTipSegment.Y
+        }
+    }
+    $worm.Segments.Remove($worm.TailTipKey)
+    $worm.TailTipKey = "X1$($X1)X2$($X2)Y$($Y)"
+
+    $worm.CurrentLength -= 1
+    $worm.TailTipIndex += 1
+    
 }
 
 Function Get-CursorWithinPlayArea {
@@ -248,21 +297,22 @@ Function Get-CursorWithinPlayArea {
 function Get-CursorIsOnWormSegment {
     $pos = $host.UI.RawUI.CursorPosition
     # Check if the player is running into himself
-    if ($worm.Segments | Where-Object { ($_.X1 -eq $pos.X) -and ($_.Y -eq $pos.Y) }) {
-        return $true
-    } elseif ($worm.Segments | Where-Object { ($_.X2 -eq $pos.X) -and ($_.Y -eq $pos.Y) }) {
+    $X1 = $pos.X
+    $X2 = $X1 + 1
+    $Y = $pos.Y
+    if ($worm.Segments."X1$($X1)X2$($X2)Y$($Y)") {
         return $true
     }
     return $false
 }
 
-function End-Game {
+function Stop-Game {
     Param(
         [Parameter(Mandatory=$true)]$Message
     )
     $Script:Exit = $true
     # Erase the worm!
-    1..($worm.Segments.Count) | ForEach-Object {
+    1..($worm.CurrentLength) | ForEach-Object {
         Start-Sleep -Milliseconds 10
         Remove-WormSegment
     }
@@ -286,11 +336,12 @@ function Move-Worm {
             Move-CursorPosition -X -3
         }
     }
+    
     if ((-not (Get-CursorWithinPlayArea)) -or (Get-CursorIsOnWormSegment)) {
-    End-Game -Message " BAM! You're DEAD! Score : $Script:Score "
+        Stop-Game -Message " BAM! You're DEAD! Score : $Script:Score "
     } else {
         Add-WormSegment
-        if ($worm.Segments.Count -gt $worm.Length) {
+        if ($worm.CurrentLength -gt $worm.Length) {
             Remove-WormSegment
         }
     }
@@ -318,7 +369,7 @@ Function Read-Key {
                 }
             }
             Escape {
-                End-Game -Message " Goodbye! Score : $Script:Score "
+                Stop-Game -Message " Goodbye! Score : $Script:Score "
             }
         }
     }
@@ -373,11 +424,21 @@ switch (Get-Random -Minimum 0 -Maximum 4) {
 }
 
 # Set the coordinates of the first worm segment determined by the starting direction
-$worm.Segments[0].X1 = $Host.UI.RawUI.CursorPosition.X
+$X1 = $Host.UI.RawUI.CursorPosition.X
+$X2 = $X1 + 1
+$Y  = $Host.UI.RawUI.CursorPosition.Y
+$worm.LastNewSegment = @{'X' = $X1;'Y' = $Y; Direction = $worm.Direction}
+$segmentKey = "X1$($X1)X2$($X2)Y$($Y)"
+$worm.TailTipKey = $segmentKey
+$worm.Segments.$segmentKey = $worm.LastNewSegment
+$worm.SegmentKeys.Add($segmentKey) | Out-Null
+$worm.CurrentLength += 1
+
+# :TODO: Add all of the beginning segments here and set the correct .TailTipKey ($worm.Length segment)
+# 1..$worm.Length
+
 Move-CursorPosition -X 1 # Unless the cursor is repositioned here, the worm 
                          # immediately eats itself if the starting direction is Right
-$worm.Segments[0].X2 = $Host.UI.RawUI.CursorPosition.X
-$worm.Segments[0].Y = $Host.UI.RawUI.CursorPosition.Y
 
 while ($Script:Exit -eq $false) {
     Write-Score
